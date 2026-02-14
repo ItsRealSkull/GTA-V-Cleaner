@@ -1,12 +1,22 @@
 @echo off
 setlocal enabledelayedexpansion
 
+:: === Salva il profilo utente PRIMA dell'elevazione ===
+set "REAL_LOCALAPPDATA=%LocalAppData%"
+
 :: === Auto-elevazione ad amministratore ===
 net session >nul 2>&1
 if %errorlevel% neq 0 (
     echo Richiesta permessi di amministratore...
-    powershell -Command "Start-Process -Verb RunAs -FilePath '%~f0'"
+    powershell -Command "Start-Process -Verb RunAs -FilePath '%~f0' -ArgumentList 'LOCALAPPDATA=%LocalAppData%'"
     exit /b
+)
+
+:: Recupera il LocalAppData dell'utente reale se passato come argomento
+if not "%~1"=="" (
+    for /f "tokens=1,* delims==" %%A in ("%~1") do (
+        if /i "%%A"=="LOCALAPPDATA" set "REAL_LOCALAPPDATA=%%B"
+    )
 )
 
 title GTA V Mod Cleaner (ENB / ReShade / FiveM)
@@ -17,7 +27,7 @@ echo   GTA V Mod Cleaner (ENB / ReShade / FiveM)
 echo ==================================================
 echo.
 
-:: 1. Selezione directory
+:: 1. Selezione directory GTA V
 set /p "GTAPATH=Incolla il percorso della cartella GTA V: "
 set "GTAPATH=!GTAPATH:"=!"
 
@@ -73,19 +83,20 @@ echo.
 
 if !FOUND! equ 0 (
     echo Nessun residuo di mod grafiche trovato. Gia' pulita!
-) else (
-    echo Trovati !FOUND! elementi da rimuovere.
-    echo.
-    set /p "CONFIRM=Vuoi eliminarli? (s/n): "
-
-    if /i "!CONFIRM!"=="s" goto :DO_CLEAN
-    if /i "!CONFIRM!"=="si" goto :DO_CLEAN
-    if /i "!CONFIRM!"=="y" goto :DO_CLEAN
-
-    echo.
-    echo Pulizia mod grafiche saltata.
     goto :FIVEM_SECTION
 )
+
+echo Trovati !FOUND! elementi da rimuovere.
+echo.
+set /p "CONFIRM=Vuoi eliminarli? (s/n): "
+
+if /i "!CONFIRM!"=="s" goto :DO_CLEAN
+if /i "!CONFIRM!"=="si" goto :DO_CLEAN
+if /i "!CONFIRM!"=="y" goto :DO_CLEAN
+
+echo.
+echo Pulizia mod grafiche saltata.
+goto :FIVEM_SECTION
 
 :DO_CLEAN
 echo.
@@ -139,6 +150,7 @@ echo Totale rimossi: !REMOVED!/!FOUND!
 if !ERRORS! gtr 0 (
     color 0E
     echo Attenzione: !ERRORS! elementi non rimossi (file in uso?^)
+    color 0A
 )
 
 :: ============================================
@@ -151,15 +163,34 @@ echo   Pulizia FiveM (mods e plugins)
 echo ==================================================
 echo.
 
-:: Cerca la cartella FiveM nei percorsi comuni
+:: Cerca FiveM - prova il LocalAppData dell'utente reale
 set "FIVEM_APP="
 
-if exist "%LocalAppData%\FiveM\FiveM.app" (
-    set "FIVEM_APP=%LocalAppData%\FiveM\FiveM.app"
+:: Prova il percorso reale dell'utente
+if exist "!REAL_LOCALAPPDATA!\FiveM\FiveM.app" (
+    set "FIVEM_APP=!REAL_LOCALAPPDATA!\FiveM\FiveM.app"
+)
+
+:: Fallback: prova il LocalAppData corrente
+if not defined FIVEM_APP (
+    if exist "%LocalAppData%\FiveM\FiveM.app" (
+        set "FIVEM_APP=%LocalAppData%\FiveM\FiveM.app"
+    )
+)
+
+:: Fallback: cerca in tutti i profili utente
+if not defined FIVEM_APP (
+    for /d %%U in ("%SystemDrive%\Users\*") do (
+        if exist "%%U\AppData\Local\FiveM\FiveM.app" (
+            if not defined FIVEM_APP (
+                set "FIVEM_APP=%%U\AppData\Local\FiveM\FiveM.app"
+            )
+        )
+    )
 )
 
 if not defined FIVEM_APP (
-    echo FiveM non trovato in: %LocalAppData%\FiveM
+    echo FiveM non trovato automaticamente.
     echo.
     set /p "FIVEM_CUSTOM=Inserisci il percorso di FiveM.app (o premi INVIO per saltare): "
     set "FIVEM_CUSTOM=!FIVEM_CUSTOM:"=!"
@@ -176,27 +207,38 @@ echo Cartella FiveM trovata: !FIVEM_APP!
 echo.
 
 set "FIVEM_FOUND=0"
+set "FIVEM_FILES=0"
 
 :: Controlla mods
 if exist "!FIVEM_APP!\mods\" (
-    echo   [CARTELLA] mods\
-    set /a FIVEM_FOUND+=1
+    set "MODS_COUNT=0"
+    for /f %%A in ('dir /a /b "!FIVEM_APP!\mods" 2^>nul ^| find /c /v ""') do set "MODS_COUNT=%%A"
+    if !MODS_COUNT! gtr 0 (
+        echo   [CARTELLA] mods\  (!MODS_COUNT! elementi^)
+        set /a FIVEM_FOUND+=1
+        set /a FIVEM_FILES+=!MODS_COUNT!
+    )
 )
 
 :: Controlla plugins
 if exist "!FIVEM_APP!\plugins\" (
-    echo   [CARTELLA] plugins\
-    set /a FIVEM_FOUND+=1
+    set "PLUG_COUNT=0"
+    for /f %%A in ('dir /a /b "!FIVEM_APP!\plugins" 2^>nul ^| find /c /v ""') do set "PLUG_COUNT=%%A"
+    if !PLUG_COUNT! gtr 0 (
+        echo   [CARTELLA] plugins\  (!PLUG_COUNT! elementi^)
+        set /a FIVEM_FOUND+=1
+        set /a FIVEM_FILES+=!PLUG_COUNT!
+    )
 )
 
 echo.
 
 if !FIVEM_FOUND! equ 0 (
-    echo Nessuna cartella mods/plugins trovata in FiveM. Gia' pulita!
+    echo Nessun contenuto in mods/plugins. Gia' pulita!
     goto :DONE
 )
 
-echo Trovate !FIVEM_FOUND! cartelle FiveM.
+echo Trovate !FIVEM_FOUND! cartelle con !FIVEM_FILES! elementi totali.
 echo ATTENZIONE: tutto il contenuto di mods\ e plugins\ verra' eliminato!
 echo.
 set /p "FCONFIRM=Vuoi svuotarle? (s/n): "
@@ -215,7 +257,6 @@ echo --- Risultato FiveM ---
 echo.
 
 set "FREM=0"
-set "FERR=0"
 
 :: Svuota mods
 if exist "!FIVEM_APP!\mods\" (
